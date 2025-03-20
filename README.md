@@ -119,9 +119,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact 📧
 
-Your Name - [oluowolabiai@gmail.com](mailto:oluowolabiai@gmail.com)
+Your Name - [Olu owolabi](mailto:oluowolabiai@gmail.com)
 
-Project Link: [https://github.com/yourusername/Convert-io](https://github.com/yourusername/Convert-io)
+Project Link: [](https://github.com/kyluai/image-audio-converter)
 
 ## Acknowledgments 🙏
 
