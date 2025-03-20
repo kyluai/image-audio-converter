@@ -119,7 +119,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact 📧
 
-Your Name - [Olu owolabi -via email](mailto:oluowolabiai@gmail.com)
+Email me - [Click me](mailto:oluowolabiai@gmail.com)
 
 Project Link: [Github Link](https://github.com/kyluai/image-audio-converter)
 
