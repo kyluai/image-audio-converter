@@ -12,7 +12,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FiUpload, FiCheck, FiAlertCircle, FiLoader, FiPlay, FiPause, FiVolume2, FiTrash2, FiMessageCircle, FiMail, FiX } from 'react-icons/fi';
+import { FiUpload, FiCheck, FiAlertCircle, FiLoader, FiPlay, FiPause, FiVolume2, FiTrash2, FiMessageCircle, FiMail, FiX, FiImage, FiMusic, FiChevronDown } from 'react-icons/fi';
 import { formatBytes } from '../utils/format';
 import { FileWithPreview } from '@/types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -239,6 +239,33 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   const [isContactOpen, setIsContactOpen] = useState(false);
   const [convertedImages, setConvertedImages] = useState<{ url: string; filename: string }[]>([]);
   
+  // Fetch supported formats from backend
+  useEffect(() => {
+    const fetchFormats = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/formats');
+        if (!response.ok) {
+          throw new Error('Failed to fetch formats');
+        }
+        const data = await response.json();
+        setFormats({
+          input: {
+            mimeTypes: [...data.images.map((ext: string) => `image/${ext}`), ...data.audio.map((ext: string) => `audio/${ext}`)],
+            extensions: [...data.images, ...data.audio]
+          },
+          output: {
+            formats: [...data.images, ...data.audio]
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching formats:', error);
+        setMessage('Error loading formats. Please refresh the page.');
+      }
+    };
+
+    fetchFormats();
+  }, []);
+
   // Conversion options
   const [conversionOptions, setConversionOptions] = useState<ConversionOptions>({
     quality: 80,
@@ -267,54 +294,6 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
 
   // Add new state for media type
   const [selectedMediaType, setSelectedMediaType] = useState<'image' | 'audio' | null>(null);
-
-  /**
-   * Fetches available conversion formats from the backend
-   * Sets up cleanup for file previews and ongoing conversions
-   */
-  useEffect(() => {
-    const controller = new AbortController();
-    
-    const fetchFormats = async () => {
-      try {
-        const response = await fetch('http://localhost:3001/api/formats', {
-          signal: controller.signal,
-          headers: {
-            'Accept': 'application/json',
-          },
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        setFormats(data);
-      } catch (error) {
-        if (error instanceof Error && error.name !== 'AbortError') {
-          console.error('Error fetching formats:', error);
-          setMessage('Error loading formats. Please refresh the page.');
-        }
-      }
-    };
-
-    fetchFormats();
-
-    return () => {
-      controller.abort();
-      // Cleanup any ongoing conversions
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      // Cleanup file previews
-      files.forEach(file => {
-        if (file.preview) {
-          URL.revokeObjectURL(file.preview);
-        }
-      });
-    };
-  }, []);
 
   /**
    * Handles file drop events
@@ -347,6 +326,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   };
 
   const getFileType = (file: File): 'image' | 'audio' | 'video' | 'unknown' => {
+    if (!file || !file.type) return 'unknown';
     if (file.type.startsWith('image/')) return 'image';
     if (file.type.startsWith('audio/')) return 'audio';
     if (file.type.startsWith('video/')) return 'video';
@@ -354,6 +334,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   };
 
   const validateFileType = (file: File, selectedFormat: string): boolean => {
+    if (!file || !file.type) return false;
+    
     const fileType = getFileType(file);
     const imageFormats = ['jpeg', 'png', 'webp', 'gif', 'tiff'];
     const audioFormats = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'];
@@ -372,27 +354,14 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
   };
 
   const getEndpoint = (file: File): string => {
+    if (!file || !file.type) return 'image'; // Default to image if file type is unknown
     const fileType = getFileType(file);
-    switch (fileType) {
-      case 'image':
-        return '/api/convert';
-      case 'audio':
-        return '/api/convert-audio';
-      case 'video':
-        return '/api/convert-video';
-      default:
-        throw new Error('Unsupported file type');
-    }
+    return fileType === 'image' ? 'image' : 'audio';
   };
 
   const handleSubmit = async () => {
-    if (files.length === 0) {
-      setMessage('Please upload files first');
-      return;
-    }
-
-    if (!selectedFormat) {
-      setMessage('Please select a format first');
+    if (!files.length || !selectedFormat) {
+      setMessage('Please select files and a target format');
       return;
     }
 
@@ -400,73 +369,64 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
     setMessage('');
 
     try {
-      const updatedFiles = [...files];
+      const formData = new FormData();
+      formData.append('file', files[0].file);
+      formData.append('format', selectedFormat);
 
-      for (let i = 0; i < updatedFiles.length; i++) {
-        const file = updatedFiles[i];
-        
-        try {
-          setMessage(`Converting ${file.file.name}...`);
-          updatedFiles[i] = { ...file, status: 'converting' as const };
-          setFiles([...updatedFiles]);
+      const endpoint = getEndpoint(files[0].file);
+      console.log(`Attempting to convert file: ${files[0].file.name} to ${selectedFormat} format`);
+      console.log(`File type: ${files[0].file.type}, Size: ${formatBytes(files[0].file.size)}`);
+      
+      const response = await fetch(`http://localhost:3001/api/convert/${endpoint}`, {
+        method: 'POST',
+        body: formData,
+      });
 
-          const formData = new FormData();
-          formData.append('file', file.file);
-          formData.append('format', selectedFormat);
-          formData.append('options', JSON.stringify(conversionOptions));
-
-          const endpoint = file.isAudio ? '/api/convert-audio' : '/api/convert';
-          const response = await fetch(`${BACKEND_URL}${endpoint}`, {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!response.ok) {
-            throw new Error(`Conversion failed: ${response.statusText}`);
-          }
-
-          const data = await response.json();
-          console.log('Conversion response:', data);
-
-          // Create download URL and trigger download
-          const downloadUrl = `${BACKEND_URL}${data.converted.path}`;
-          
-          // Fetch the converted file and download it
-          const fileResponse = await fetch(downloadUrl);
-          const blob = await fileResponse.blob();
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = data.converted.filename || `converted-${file.file.name}.${selectedFormat}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(url);
-
-          updatedFiles[i] = {
-            ...file,
-            status: 'done' as const,
-            convertedUrl: downloadUrl,
-            convertedFilename: data.converted.filename
-          };
-          setFiles([...updatedFiles]);
-          setMessage(`Successfully converted ${file.file.name}! Downloading...`);
-          
-          // Clear success message after 3 seconds
-          setTimeout(() => {
-            setMessage('');
-          }, 3000);
-        } catch (error) {
-          console.error('Error converting file:', error);
-          const errorMessage = error instanceof Error ? error.message : 'Conversion failed';
-          updatedFiles[i] = { ...file, status: 'error' as const, error: errorMessage };
-          setFiles([...updatedFiles]);
-          setMessage(`Error converting ${file.file.name}: ${errorMessage}`);
-        }
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Server response error:', response.status, errorData);
+        throw new Error(`Conversion failed: ${errorData.error || response.statusText}`);
       }
+
+      const data = await response.json();
+      console.log('Conversion successful:', data);
+      setMessage('Conversion successful!');
+      
+      // Add converted file to the list
+      const convertedFile = {
+        url: `http://localhost:3001/uploads/${data.convertedFile}`,
+        filename: data.convertedFile
+      };
+      setConvertedImages(prev => [...prev, convertedFile]);
+      
+      // Automatically download the converted file
+      downloadFile(convertedFile.url, convertedFile.filename);
+
+      // Clear the files after successful conversion
+      setFiles([]);
+      setSelectedFormat('');
+    } catch (error) {
+      console.error('Conversion error:', error);
+      setMessage(`Conversion failed: ${error instanceof Error ? error.message : 'Please try again.'}`);
     } finally {
       setUploading(false);
     }
+  };
+
+  // Add a new function to handle file downloads
+  const downloadFile = (url: string, filename: string) => {
+    // Create a temporary link element
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename; // Set the download attribute with the filename
+    link.target = '_blank'; // Open in a new tab as fallback
+    
+    // Append to the document, click it, and remove it
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    console.log(`Downloading file: ${filename} from ${url}`);
   };
 
   const cancelConversion = () => {
@@ -591,77 +551,95 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
       initial="initial"
       animate="animate"
       exit="exit"
-      className="w-full max-w-7xl mx-auto space-y-8 p-8"
+      className="w-full max-w-7xl mx-auto space-y-6 p-6"
     >
-      {/* Media Type Tabs */}
-      <div className="space-y-6">
-        <div className="flex gap-4 border-b border-gray-700">
-          <button
-            onClick={() => setSelectedMediaType('image')}
-            className={`px-6 py-3 text-lg font-medium transition-all relative
-              ${selectedMediaType === 'image' 
-                ? 'text-white' 
-                : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            <span className="flex items-center gap-2">
-              <span>🖼️</span>
-              Image Conversion
-            </span>
-            {selectedMediaType === 'image' && (
-              <motion.div
-                layoutId="activeTab"
-                className="absolute bottom-0 left-0 right-0 h-0.5 bg-loyola-green"
-              />
-            )}
-          </button>
-          <button
-            onClick={() => setSelectedMediaType('audio')}
-            className={`px-6 py-3 text-lg font-medium transition-all relative
-              ${selectedMediaType === 'audio' 
-                ? 'text-white' 
-                : 'text-gray-400 hover:text-gray-200'}`}
-          >
-            <span className="flex items-center gap-2">
-              <span>🎵</span>
-              Audio Conversion
-            </span>
-            {selectedMediaType === 'audio' && (
-              <motion.div
-                layoutId="activeTab"
-                className="absolute bottom-0 left-0 right-0 h-0.5 bg-loyola-green"
-              />
-            )}
-          </button>
-        </div>
-
-        {/* Format Selection with Conversion Flow */}
-        <AnimatePresence mode="wait">
-          {selectedMediaType && (
+      {/* Media Type Tabs - REDESIGNED */}
+      <div className="flex justify-center gap-4">
+        <motion.button
+          onClick={() => setSelectedMediaType('image')}
+          className={`px-8 py-3 rounded-xl font-medium transition-all relative
+            flex items-center gap-3 shadow-lg
+            ${selectedMediaType === 'image' 
+              ? 'bg-loyola-green text-white' 
+              : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <FiImage className="w-5 h-5" />
+          <span>Image Conversion</span>
+          {selectedMediaType === 'image' && (
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="bg-gray-800/50 rounded-lg backdrop-blur-sm p-6"
-            >
-              <div className="flex items-center justify-center gap-6">
-                <div className="text-center">
-                  <p className="text-sm text-gray-400 mb-2">Input Format</p>
-                  <div className="px-4 py-2 bg-gray-700 rounded-lg">
-                    {selectedMediaType === 'image' ? '*.png, *.jpg, *.jpeg' : '*.mp3, *.wav'}
-                  </div>
-                </div>
-                
-                <div className="flex items-center text-loyola-green text-2xl">
-                  ⟶
-                </div>
+              layoutId="activeTabIndicator"
+              className="absolute -bottom-2 left-0 right-0 h-1 bg-white rounded-full"
+            />
+          )}
+        </motion.button>
+        
+        <motion.button
+          onClick={() => setSelectedMediaType('audio')}
+          className={`px-8 py-3 rounded-xl font-medium transition-all relative
+            flex items-center gap-3 shadow-lg
+            ${selectedMediaType === 'audio' 
+              ? 'bg-loyola-green text-white' 
+              : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <FiMusic className="w-5 h-5" />
+          <span>Audio Conversion</span>
+          {selectedMediaType === 'audio' && (
+            <motion.div
+              layoutId="activeTabIndicator"
+              className="absolute -bottom-2 left-0 right-0 h-1 bg-white rounded-full"
+            />
+          )}
+        </motion.button>
+      </div>
 
-                <div className="text-center">
-                  <p className="text-sm text-gray-400 mb-2">Output Format</p>
+      {/* Format Selection with Conversion Flow - REDESIGNED */}
+      <AnimatePresence mode="wait">
+        {selectedMediaType && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-gray-800/50 rounded-xl backdrop-blur-sm p-6 shadow-xl border border-gray-700/50"
+          >
+            <div className="flex flex-col md:flex-row items-center justify-center gap-6">
+              <div className="text-center flex-1">
+                <p className="text-sm text-gray-400 mb-2 uppercase tracking-wider">Input Format</p>
+                <div className="px-6 py-3 bg-gray-700/70 rounded-lg border border-gray-600/50 shadow-inner">
+                  {files.length > 0 
+                    ? files[0].file.type.split('/')[1].toUpperCase()
+                    : 'Upload a file to see format'}
+                </div>
+              </div>
+              
+              <div className="flex items-center text-loyola-green text-3xl">
+                <motion.div
+                  animate={{ 
+                    x: [0, 5, 0],
+                    opacity: [0.5, 1, 0.5]
+                  }}
+                  transition={{ 
+                    duration: 2, 
+                    repeat: Infinity,
+                    ease: "easeInOut"
+                  }}
+                >
+                  ⟶
+                </motion.div>
+              </div>
+
+              <div className="text-center flex-1">
+                <p className="text-sm text-gray-400 mb-2 uppercase tracking-wider">Output Format</p>
+                <div className="relative">
                   <select
                     value={selectedFormat}
                     onChange={(e) => setSelectedFormat(e.target.value)}
-                    className="px-4 py-2 bg-gray-700 text-white rounded-lg border border-white/20 
-                             focus:outline-none focus:border-white/40 transition-all cursor-pointer"
+                    className="w-full px-6 py-3 bg-gray-700/70 text-white rounded-lg border border-gray-600/50 
+                             focus:outline-none focus:border-loyola-green/50 focus:ring-2 focus:ring-loyola-green/30 
+                             transition-all cursor-pointer appearance-none pr-10 shadow-inner"
                   >
                     <option value="" disabled>Select Format</option>
                     {selectedMediaType === 'image' ? (
@@ -683,69 +661,127 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                       </>
                     )}
                   </select>
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none text-gray-400">
+                    <FiChevronDown className="w-5 h-5" />
+                  </div>
                 </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Upload Area */}
+      {/* Upload Area - REDESIGNED */}
       <div className="relative">
-        <div {...getRootProps()}>
-          <div 
-            className={`relative flex flex-col items-center justify-center w-full h-64 
-              border-2 border-dashed border-gray-300 dark:border-gray-600 
-              rounded-lg transition-colors duration-150 ease-in-out
-              ${isDragActive ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'hover:border-gray-400 dark:hover:border-gray-500'}
-              ${files.length > 0 ? 'bg-gray-50 dark:bg-gray-800/50' : ''}`}
-          >
-            <input {...getInputProps()} />
-            {files.length === 0 && (
-              <div className="flex flex-col items-center space-y-2">
-                <span className="text-4xl mb-2">📁</span>
-                <p className="text-lg text-gray-600 dark:text-gray-300">
-                  Drop files here or click to select
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Supported formats: PNG, JPG, MP3, WAV
+        {files.length === 0 && (
+          <div {...getRootProps()}>
+            <motion.div 
+              className={`relative flex flex-col items-center justify-center w-full h-64 
+                border-2 border-dashed rounded-xl transition-all duration-300 ease-in-out
+                ${isDragActive 
+                  ? 'border-loyola-green bg-loyola-green/10' 
+                  : 'border-gray-600 hover:border-gray-500 hover:bg-gray-800/30'}
+                ${files.length > 0 ? 'bg-gray-800/50' : ''}
+                shadow-lg backdrop-blur-sm`}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+            >
+              <input {...getInputProps()} />
+              <div className="flex flex-col items-center space-y-3 p-6 text-center">
+                <motion.div
+                  animate={{ 
+                    y: [0, -10, 0],
+                    scale: [1, 1.05, 1]
+                  }}
+                  transition={{ 
+                    duration: 3, 
+                    repeat: Infinity,
+                    ease: "easeInOut"
+                  }}
+                  className="text-5xl mb-2"
+                >
+                  {selectedMediaType === 'image' ? '🖼️' : '🎵'}
+                </motion.div>
+                <h3 className="text-lg font-medium text-white">
+                  {selectedMediaType === 'image' ? 'Upload Your Images' : 'Upload Your Audio Files'}
+                </h3>
+                <p className="text-gray-400 max-w-md">
+                  Drag and drop your files here or click to browse
                 </p>
               </div>
-            )}
+            </motion.div>
           </div>
-        </div>
+        )}
         
-        {/* Security Footer */}
-        <div className="mt-3 text-center text-sm text-gray-500 dark:text-gray-400">
-          <span className="inline-flex items-center gap-1">
-            <span>🔒</span>
-            Files are processed securely and deleted after 1 hour.
-          </span>
-        </div>
+        {/* Security Footer - REDESIGNED */}
+        {files.length === 0 && (
+          <div className="mt-3 text-center text-sm text-gray-400 flex items-center justify-center gap-2">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-800/50 border border-gray-700">
+              🔒
+            </span>
+            <span>Files are processed securely and deleted after 1 hour</span>
+          </div>
+        )}
       </div>
 
-      {/* File Preview Section */}
+      {/* File Preview Section - REDESIGNED */}
       <AnimatePresence>
         {files.length > 0 && (
           <MotionDiv
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="bg-gray-800/50 rounded-lg backdrop-blur-sm p-6"
+            className="bg-gray-800/50 rounded-xl backdrop-blur-sm p-6 shadow-xl border border-gray-700/50"
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white">File Preview</h3>
-              <button
-                onClick={clearFiles}
-                className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg
-                         transition-all duration-200 flex items-center gap-2"
-              >
-                <FiTrash2 className="w-4 h-4" />
-                Clear All
-              </button>
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <span className="text-loyola-green">📁</span> File Preview
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.multiple = true;
+                    input.accept = selectedMediaType === 'image' 
+                      ? 'image/*' 
+                      : 'audio/*';
+                    input.onchange = (e) => {
+                      const target = e.target as HTMLInputElement;
+                      if (target.files && target.files.length > 0) {
+                        const newFiles = Array.from(target.files).map(file => ({
+                          file,
+                          preview: URL.createObjectURL(file),
+                          progress: 0,
+                          status: 'pending' as const,
+                          error: null,
+                          isAudio: file.type.startsWith('audio/'),
+                          convertedUrl: null,
+                          convertedFilename: null
+                        }));
+                        setFiles(prev => [...prev, ...newFiles]);
+                      }
+                    };
+                    input.click();
+                  }}
+                  className="px-3 py-1.5 bg-loyola-green hover:bg-loyola-green/90 text-white rounded-lg
+                           transition-all duration-200 flex items-center gap-2 shadow-md hover:shadow-lg text-sm"
+                >
+                  <FiUpload className="w-4 h-4" />
+                  Add More Files
+                </button>
+                <button
+                  onClick={clearFiles}
+                  className="px-3 py-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-lg
+                           transition-all duration-200 flex items-center gap-2 shadow-md hover:shadow-lg text-sm"
+                >
+                  <FiTrash2 className="w-4 h-4" />
+                  Clear All
+                </button>
+              </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4 max-h-[400px] overflow-y-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
               {files.map((file, index) => (
                 <MotionDiv
                   key={index}
@@ -753,8 +789,8 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
                   whileHover={{ scale: 1.02 }}
-                  className="relative bg-slate-800/80 rounded-lg overflow-hidden 
-                           border border-loyola-green-30 group backdrop-blur-sm"
+                  className="relative bg-slate-800/80 rounded-xl overflow-hidden 
+                           border border-loyola-green-30 group backdrop-blur-sm shadow-lg"
                 >
                   <div className="aspect-square relative">
                     {file.isAudio ? (
@@ -781,7 +817,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                             onClick={() => handleDownload(file)}
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
-                            className="btn-download mt-4"
+                            className="mt-3 px-3 py-1.5 bg-loyola-green text-white rounded-lg shadow-md hover:shadow-lg text-sm"
                           >
                             Download
                           </MotionButton>
@@ -792,15 +828,23 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                         <img
                           src={file.preview}
                           alt={file.file.name}
-                          className="w-full h-full object-cover rounded-lg cursor-pointer"
+                          className="w-full h-full object-cover rounded-t-xl cursor-pointer"
                           onClick={(e) => openPreview(file.preview, e)}
                         />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-center p-3">
+                          <button 
+                            onClick={(e) => openPreview(file.preview, e)}
+                            className="px-2 py-1 bg-white/20 backdrop-blur-sm text-white rounded-lg text-xs"
+                          >
+                            View Full Size
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
                   <div className="p-3 border-t border-loyola-green-30">
                     <div className="flex items-center gap-2">
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-white truncate">{file.file.name}</p>
                         <p className="text-xs text-white/70">{formatBytes(file.file.size)}</p>
                       </div>
@@ -809,15 +853,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          const newFiles = files.filter((_, i) => i !== index);
-                          setFiles(newFiles);
+                          removeFile(index);
                         }}
-                        className="cursor-pointer p-2 bg-red-500 hover:bg-red-600 
-                                 text-white rounded-lg shadow-lg hover:shadow-xl 
+                        className="cursor-pointer p-1.5 bg-red-500/80 hover:bg-red-500 
+                                 text-white rounded-lg shadow-md hover:shadow-lg 
                                  transition-all duration-200"
-                        style={{ zIndex: 9999 }}
                       >
-                        <FiTrash2 className="w-4 h-4" />
+                        <FiTrash2 className="w-3.5 h-3.5" />
                       </div>
                     </div>
                   </div>
@@ -855,7 +897,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
                             repeat: Infinity,
                             ease: "linear"
                           }}
-                          className="w-12 h-12 border-2 border-t-loyola-green border-r-loyola-green 
+                          className="w-10 h-10 border-2 border-t-loyola-green border-r-loyola-green 
                                    border-b-transparent border-l-transparent rounded-full"
                         />
                       </MotionDiv>
@@ -868,69 +910,87 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadComplete }) => {
         )}
       </AnimatePresence>
 
-      {/* Transform Button */}
+      {/* Transform Button - REDESIGNED */}
       {files.length > 0 && (
         <div className="flex justify-center">
-          <button
+          <motion.button
             onClick={handleSubmit}
             disabled={!selectedFormat || files.length === 0}
-            className={`px-8 py-3 rounded-lg font-medium transition-all
+            className={`px-8 py-3 rounded-xl font-medium transition-all shadow-lg
                       ${selectedFormat && files.length > 0
-                        ? 'bg-green-500 hover:bg-green-600 text-white cursor-pointer'
-                        : 'bg-gray-500/50 text-white/50 cursor-not-allowed'}`}
+                        ? 'bg-loyola-green hover:bg-loyola-green/90 text-white cursor-pointer'
+                        : 'bg-gray-700/50 text-white/50 cursor-not-allowed'}`}
+            whileHover={selectedFormat && files.length > 0 ? { scale: 1.05 } : {}}
+            whileTap={selectedFormat && files.length > 0 ? { scale: 0.95 } : {}}
           >
-            Transform Files
-          </button>
+            <span className="flex items-center gap-2">
+              <FiUpload className="w-5 h-5" />
+              Transform Files
+            </span>
+          </motion.button>
         </div>
       )}
 
-      {/* Loading overlay */}
+      {/* Loading overlay - REDESIGNED */}
       <AnimatePresence>
         {uploading && (
           <MotionDiv
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50"
+            className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-50"
           >
             <MotionDiv
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.8, opacity: 0 }}
-              className="bg-slate-800/90 p-8 rounded-2xl shadow-2xl border border-loyola-green-30"
+              className="bg-slate-800/90 p-10 rounded-2xl shadow-2xl border border-loyola-green-30"
             >
               <TechLoader />
               <MotionDiv
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-6 text-loyola-green-70 text-lg"
+                className="mt-8 text-loyola-green-70 text-xl font-medium"
               >
                 Transforming files...
+              </MotionDiv>
+              <MotionDiv
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="mt-4 text-gray-400 text-sm"
+              >
+                This may take a few moments depending on file size
               </MotionDiv>
             </MotionDiv>
           </MotionDiv>
         )}
       </AnimatePresence>
 
-      {/* Message animation */}
+      {/* Message animation - REDESIGNED */}
       <AnimatePresence>
         {message && (
           <MotionDiv
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-4 right-4 p-4 rounded-lg shadow-lg backdrop-blur-md z-50 ${
-              message.includes('Error')
+            className={`fixed top-4 right-4 p-4 rounded-xl shadow-xl backdrop-blur-md z-50 
+              flex items-center gap-3
+              ${message.includes('failed') || message.includes('Error')
                 ? 'bg-red-500/90 text-white'
-                : 'bg-emerald-500/90 text-white'
-            }`}
+                : 'bg-emerald-500/90 text-white'}`}
           >
-            {message}
+            {message.includes('failed') || message.includes('Error') ? (
+              <FiAlertCircle className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <FiCheck className="w-5 h-5 flex-shrink-0" />
+            )}
+            <span>{message}</span>
           </MotionDiv>
         )}
       </AnimatePresence>
 
-      {/* Contact Button */}
+      {/* Contact Button - REDESIGNED */}
       <motion.div
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}

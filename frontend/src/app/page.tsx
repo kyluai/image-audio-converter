@@ -169,23 +169,14 @@ export default function Home() {
           transition={{ duration: 0.8 }}
           className="text-content text-center mb-12 -mt-16"
         >
-          <motion.h1
-            className="text-5xl font-bold mb-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            Audio & Image Converter
-          </motion.h1>
-          <motion.p
-            className="text-xl max-w-3xl mx-auto"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-          >
-            Transform your media with precision and elegance. Our advanced conversion tools 
-            deliver exceptional quality for both audio and image files.
-          </motion.p>
+          <div className="flex flex-col items-center justify-center space-y-4">
+            <h1 className="text-4xl md:text-5xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-r from-loyola-green to-loyola-green-70">
+              Image & Audio Converter
+            </h1>
+            <p className="text-xl text-gray-300 text-center max-w-2xl">
+              Convert your images and audio files to different formats with ease
+            </p>
+          </div>
           <motion.p
             className="text-loyola-green mt-2 font-medium"
             initial={{ opacity: 0 }}
@@ -194,28 +185,6 @@ export default function Home() {
           >
             @KyluAI
           </motion.p>
-        </motion.div>
-
-        {/* Enhanced dropdown hint */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
-          className="dropdown-hint glass-panel p-4 mb-8"
-        >
-          <span>Choose your output format below</span>
-          <motion.div
-            animate={{
-              y: [0, -5, 0],
-            }}
-            transition={{
-              duration: 1.5,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          >
-            <FiChevronDown className="text-loyola-green" />
-          </motion.div>
         </motion.div>
 
         {/* File upload component */}
